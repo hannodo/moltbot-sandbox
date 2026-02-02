@@ -182,13 +182,26 @@ if (process.env.CLAWDBOT_DEV_MODE === 'true') {
     config.gateway.controlUi.allowInsecureAuth = true;
 }
 
-// Telegram configuration
+// Telegram configuration (webhook mode for Cloudflare Workers)
 if (process.env.TELEGRAM_BOT_TOKEN) {
     config.channels.telegram = config.channels.telegram || {};
     config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
     config.channels.telegram.enabled = true;
     config.channels.telegram.dm = config.channels.telegram.dm || {};
     config.channels.telegram.dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    
+    // Webhook mode - required for Cloudflare Workers (no persistent connections)
+    // The webhook URL is set via TELEGRAM_WEBHOOK_URL or defaults to worker URL
+    const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL || 
+        (process.env.WORKER_PUBLIC_URL ? process.env.WORKER_PUBLIC_URL + '/telegram-webhook' : null);
+    if (webhookUrl) {
+        config.channels.telegram.webhookUrl = webhookUrl;
+        config.channels.telegram.webhookPath = '/telegram-webhook';
+        console.log('Telegram webhook URL:', webhookUrl);
+    } else {
+        console.warn('WARNING: No webhook URL configured. Set TELEGRAM_WEBHOOK_URL or WORKER_PUBLIC_URL');
+        console.warn('Telegram may not work correctly without webhook mode in Cloudflare Workers');
+    }
 }
 
 // Discord configuration

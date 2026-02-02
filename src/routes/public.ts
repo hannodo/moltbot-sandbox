@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
-import { findExistingMoltbotProcess } from '../gateway';
+import { findExistingMoltbotProcess, ensureMoltbotGateway } from '../gateway';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -61,6 +61,33 @@ publicRoutes.get('/_admin/assets/*', async (c) => {
   const assetPath = url.pathname.replace('/_admin/assets/', '/assets/');
   const assetUrl = new URL(assetPath, url.origin);
   return c.env.ASSETS.fetch(new Request(assetUrl.toString(), c.req.raw));
+});
+
+// POST /telegram-webhook - Telegram webhook endpoint (no auth - Telegram needs to POST here)
+// This proxies to the gateway's webhook handler
+publicRoutes.post('/telegram-webhook', async (c) => {
+  const sandbox = c.get('sandbox');
+  
+  console.log('[TELEGRAM-WEBHOOK] Received webhook POST');
+  
+  try {
+    // Ensure gateway is running (start if needed)
+    await ensureMoltbotGateway(sandbox, c.env);
+    
+    // Forward the request to the gateway's webhook endpoint
+    const response = await sandbox.containerFetch(c.req.raw, MOLTBOT_PORT);
+    
+    console.log('[TELEGRAM-WEBHOOK] Gateway response status:', response.status);
+    
+    return new Response(response.body, {
+      status: response.status,
+      headers: response.headers,
+    });
+  } catch (error) {
+    console.error('[TELEGRAM-WEBHOOK] Error:', error);
+    // Return 200 to Telegram to avoid retries (we'll log the error)
+    return c.json({ ok: true, error: 'Gateway not ready' });
+  }
 });
 
 export { publicRoutes };
