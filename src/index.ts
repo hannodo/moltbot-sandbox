@@ -183,13 +183,26 @@ app.use('*', async (c, next) => {
 
 // Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+
+  // Explicitly allow public routes to bypass Access middleware
+  const isPublicPath =
+    url.pathname === '/telegram-webhook' ||
+    url.pathname === '/sandbox-health' ||
+    url.pathname === '/api/status' ||
+    url.pathname === '/logo.png' ||
+    url.pathname === '/logo-small.png' ||
+    url.pathname.startsWith('/_admin/assets/');
+
+  if (isPublicPath) return next();
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
-  const middleware = createAccessMiddleware({ 
+  const middleware = createAccessMiddleware({
     type: acceptsHtml ? 'html' : 'json',
-    redirectOnMissing: acceptsHtml 
+    redirectOnMissing: acceptsHtml
   });
-  
+
   return middleware(c, next);
 });
 
