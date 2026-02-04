@@ -34,6 +34,8 @@ OPENCLAW_PERSIST_DIR="$BACKUP_DIR/openclaw"
 OPENCLAW_WRAPPER_DIR="$OPENCLAW_PERSIST_DIR/bin"
 OPENCLAW_PERSIST_BIN="$OPENCLAW_PERSIST_DIR/node_modules/.bin"
 OPENCLAW_PERSIST_VERSION="${OPENCLAW_PERSIST_VERSION:-latest}"
+OPENCLAW_INSTALL_LOG="$OPENCLAW_PERSIST_DIR/install.log"
+OPENCLAW_INSTALL_LOCK="$OPENCLAW_PERSIST_DIR/.installing"
 
 if [ -d "$BACKUP_DIR" ]; then
     mkdir -p "$OPENCLAW_PERSIST_DIR" "$OPENCLAW_WRAPPER_DIR"
@@ -46,20 +48,10 @@ if [ -d "$BACKUP_DIR" ]; then
 EOFJSON
     fi
 
-    if [ ! -x "$OPENCLAW_PERSIST_BIN/openclaw" ]; then
-        echo "Installing OpenClaw into $OPENCLAW_PERSIST_DIR (version: $OPENCLAW_PERSIST_VERSION)..."
-        set +e
-        npm install --prefix "$OPENCLAW_PERSIST_DIR" "openclaw@$OPENCLAW_PERSIST_VERSION" --no-fund --no-audit
-        install_rc=$?
-        set -e
-        if [ $install_rc -ne 0 ]; then
-            echo "WARNING: Persistent OpenClaw install failed, falling back to system OpenClaw."
-        fi
-    fi
-
     # Wrapper to make `openclaw update` work in this environment
     cat > "$OPENCLAW_WRAPPER_DIR/openclaw" << 'EOFWRAP'
 #!/bin/sh
+PERSIST_BIN="/data/moltbot/openclaw/node_modules/.bin/openclaw"
 if [ "$1" = "update" ]; then
   shift
   VERSION="latest"
@@ -78,15 +70,33 @@ if [ "$1" = "update" ]; then
   npm install --prefix /data/moltbot/openclaw "openclaw@${VERSION}" --no-fund --no-audit
   exit $?
 fi
-exec /data/moltbot/openclaw/node_modules/.bin/openclaw "$@"
+if [ -x "$PERSIST_BIN" ]; then
+  exec "$PERSIST_BIN" "$@"
+fi
+exec /usr/local/bin/openclaw "$@"
 EOFWRAP
     chmod +x "$OPENCLAW_WRAPPER_DIR/openclaw"
+
+    if [ ! -x "$OPENCLAW_PERSIST_BIN/openclaw" ]; then
+        if mkdir "$OPENCLAW_INSTALL_LOCK" 2>/dev/null; then
+            echo "Installing OpenClaw into $OPENCLAW_PERSIST_DIR (version: $OPENCLAW_PERSIST_VERSION) in background..."
+            (
+                npm install --prefix "$OPENCLAW_PERSIST_DIR" "openclaw@$OPENCLAW_PERSIST_VERSION" --no-fund --no-audit > "$OPENCLAW_INSTALL_LOG" 2>&1
+                rc=$?
+                rm -rf "$OPENCLAW_INSTALL_LOCK"
+                exit $rc
+            ) &
+        else
+            echo "OpenClaw install already in progress; continuing startup."
+        fi
+    fi
 
     if [ -x "$OPENCLAW_PERSIST_BIN/openclaw" ]; then
         export PATH="$OPENCLAW_WRAPPER_DIR:$OPENCLAW_PERSIST_BIN:$PATH"
         echo "Using persistent OpenClaw at $OPENCLAW_PERSIST_DIR"
     else
-        echo "Persistent OpenClaw not available, using system OpenClaw."
+        export PATH="$OPENCLAW_WRAPPER_DIR:$PATH"
+        echo "Persistent OpenClaw not ready yet; using system OpenClaw for now."
     fi
 else
     echo "Persistent OpenClaw not configured (no $BACKUP_DIR)."
