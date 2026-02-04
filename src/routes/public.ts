@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import { MOLTBOT_PORT } from '../config';
+import { MOLTBOT_PORT, TELEGRAM_WEBHOOK_PORT } from '../config';
 import { findExistingMoltbotProcess, ensureMoltbotGateway } from '../gateway';
 
 /**
@@ -74,8 +74,9 @@ publicRoutes.post('/telegram-webhook', async (c) => {
     // Ensure gateway is running (start if needed)
     await ensureMoltbotGateway(sandbox, c.env);
     
-    // Forward the request to the gateway's webhook endpoint
-    const response = await sandbox.containerFetch(c.req.raw, MOLTBOT_PORT);
+    // Forward the request to the Telegram webhook listener inside the container
+    // OpenClaw listens on 8787 by default for Telegram webhooks.
+    const response = await sandbox.containerFetch(c.req.raw, TELEGRAM_WEBHOOK_PORT);
     
     console.log('[TELEGRAM-WEBHOOK] Gateway response status:', response.status);
     

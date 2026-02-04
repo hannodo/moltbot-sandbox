@@ -40,13 +40,19 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
     } else {
       envVars.ANTHROPIC_BASE_URL = normalizedBaseUrl;
     }
-  } else if (env.ANTHROPIC_BASE_URL) {
-    envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
+  } else {
+    if (env.OPENAI_BASE_URL) {
+      envVars.OPENAI_BASE_URL = env.OPENAI_BASE_URL.replace(/\/+$/, '');
+    }
+    if (env.ANTHROPIC_BASE_URL) {
+      envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL.replace(/\/+$/, '');
+    }
   }
   // Map MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN (container expects this name)
   if (env.MOLTBOT_GATEWAY_TOKEN) envVars.CLAWDBOT_GATEWAY_TOKEN = env.MOLTBOT_GATEWAY_TOKEN;
   if (env.DEV_MODE) envVars.CLAWDBOT_DEV_MODE = env.DEV_MODE; // Pass DEV_MODE as CLAWDBOT_DEV_MODE to container
   if (env.CLAWDBOT_BIND_MODE) envVars.CLAWDBOT_BIND_MODE = env.CLAWDBOT_BIND_MODE;
+  if (env.PREFERRED_PROVIDER) envVars.PREFERRED_PROVIDER = env.PREFERRED_PROVIDER;
   if (env.TELEGRAM_BOT_TOKEN) envVars.TELEGRAM_BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
   if (env.TELEGRAM_WEBHOOK_URL) envVars.TELEGRAM_WEBHOOK_URL = env.TELEGRAM_WEBHOOK_URL;
   if (env.TELEGRAM_DM_POLICY) envVars.TELEGRAM_DM_POLICY = env.TELEGRAM_DM_POLICY;

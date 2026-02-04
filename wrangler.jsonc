@@ -32,6 +32,15 @@
   "build": {
     "command": "npm run build",
   },
+  // Container configuration for the Moltbot sandbox
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "standard-4",
+      "max_instances": 1,
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

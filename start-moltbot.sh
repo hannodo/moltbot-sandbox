@@ -25,6 +25,73 @@ BACKUP_DIR="/data/moltbot"
 echo "Config directory: $CONFIG_DIR"
 echo "Backup directory: $BACKUP_DIR"
 
+# ============================================================
+# PERSISTENT OPENCLAW INSTALL (R2-backed if available)
+# ============================================================
+# Install OpenClaw into a persistent location so self-updates can survive restarts.
+# If /data/moltbot is not mounted, this will still work but won't persist.
+OPENCLAW_PERSIST_DIR="$BACKUP_DIR/openclaw"
+OPENCLAW_WRAPPER_DIR="$OPENCLAW_PERSIST_DIR/bin"
+OPENCLAW_PERSIST_BIN="$OPENCLAW_PERSIST_DIR/node_modules/.bin"
+OPENCLAW_PERSIST_VERSION="${OPENCLAW_PERSIST_VERSION:-latest}"
+
+if [ -d "$BACKUP_DIR" ]; then
+    mkdir -p "$OPENCLAW_PERSIST_DIR" "$OPENCLAW_WRAPPER_DIR"
+    if [ ! -f "$OPENCLAW_PERSIST_DIR/package.json" ]; then
+        cat > "$OPENCLAW_PERSIST_DIR/package.json" << 'EOFJSON'
+{
+  "name": "openclaw-persist",
+  "private": true
+}
+EOFJSON
+    fi
+
+    if [ ! -x "$OPENCLAW_PERSIST_BIN/openclaw" ]; then
+        echo "Installing OpenClaw into $OPENCLAW_PERSIST_DIR (version: $OPENCLAW_PERSIST_VERSION)..."
+        set +e
+        npm install --prefix "$OPENCLAW_PERSIST_DIR" "openclaw@$OPENCLAW_PERSIST_VERSION" --no-fund --no-audit
+        install_rc=$?
+        set -e
+        if [ $install_rc -ne 0 ]; then
+            echo "WARNING: Persistent OpenClaw install failed, falling back to system OpenClaw."
+        fi
+    fi
+
+    # Wrapper to make `openclaw update` work in this environment
+    cat > "$OPENCLAW_WRAPPER_DIR/openclaw" << 'EOFWRAP'
+#!/bin/sh
+if [ "$1" = "update" ]; then
+  shift
+  VERSION="latest"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --version|-v)
+        VERSION="$2"
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+  echo "[openclaw-wrapper] Updating OpenClaw in /data/moltbot/openclaw (version: ${VERSION})..."
+  npm install --prefix /data/moltbot/openclaw "openclaw@${VERSION}" --no-fund --no-audit
+  exit $?
+fi
+exec /data/moltbot/openclaw/node_modules/.bin/openclaw "$@"
+EOFWRAP
+    chmod +x "$OPENCLAW_WRAPPER_DIR/openclaw"
+
+    if [ -x "$OPENCLAW_PERSIST_BIN/openclaw" ]; then
+        export PATH="$OPENCLAW_WRAPPER_DIR:$OPENCLAW_PERSIST_BIN:$PATH"
+        echo "Using persistent OpenClaw at $OPENCLAW_PERSIST_DIR"
+    else
+        echo "Persistent OpenClaw not available, using system OpenClaw."
+    fi
+else
+    echo "Persistent OpenClaw not configured (no $BACKUP_DIR)."
+fi
+
 # Create config directory
 mkdir -p "$CONFIG_DIR"
 
@@ -152,6 +219,8 @@ config.agents.defaults = config.agents.defaults || {};
 config.agents.defaults.model = config.agents.defaults.model || {};
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
+config.commands = config.commands || {};
+config.commands.restart = true;
 
 // Clean up any broken anthropic provider config from previous runs
 // (older versions didn't include required 'name' field)
@@ -189,14 +258,15 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     config.channels.telegram.enabled = true;
     // Webhook mode - required for Cloudflare Workers (no persistent connections)
     // The webhook URL is set via TELEGRAM_WEBHOOK_URL or defaults to worker URL
-    const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL || 
-        (process.env.WORKER_PUBLIC_URL ? process.env.WORKER_PUBLIC_URL + '/telegram-webhook' : null);
+    const baseWorkerUrl = process.env.WORKER_PUBLIC_URL || process.env.WORKER_URL;
+    const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL ||
+        (baseWorkerUrl ? baseWorkerUrl.replace(/\/+$/, '') + '/telegram-webhook' : null);
     if (webhookUrl) {
         config.channels.telegram.webhookUrl = webhookUrl;
         config.channels.telegram.webhookPath = '/telegram-webhook';
         console.log('Telegram webhook URL:', webhookUrl);
     } else {
-        console.warn('WARNING: No webhook URL configured. Set TELEGRAM_WEBHOOK_URL or WORKER_PUBLIC_URL');
+        console.warn('WARNING: No webhook URL configured. Set TELEGRAM_WEBHOOK_URL, WORKER_PUBLIC_URL, or WORKER_URL');
         console.warn('Telegram may not work correctly without webhook mode in Cloudflare Workers');
     }
 }
@@ -218,21 +288,73 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     config.channels.slack.enabled = true;
 }
 
-// Base URL override (e.g., for Cloudflare AI Gateway)
-// Usage: Set AI_GATEWAY_BASE_URL or ANTHROPIC_BASE_URL to your endpoint like:
+// Provider selection (AI Gateway preferred, otherwise direct OpenAI/Anthropic)
+// AI Gateway usage:
 //   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 //   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
-const baseUrl = (process.env.AI_GATEWAY_BASE_URL || process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
-const isOpenAI = baseUrl.endsWith('/openai');
+const preferredProvider = (process.env.PREFERRED_PROVIDER || '').toLowerCase();
+const preferOpenAI = preferredProvider === 'openai';
+const preferAnthropic = preferredProvider === 'anthropic';
 
-if (isOpenAI) {
-    // Create custom openai provider config with baseUrl override
-    // Omit apiKey so moltbot falls back to OPENAI_API_KEY env var
-    console.log('Configuring OpenAI provider with base URL:', baseUrl);
+const gatewayBaseUrl = (process.env.AI_GATEWAY_BASE_URL || '').replace(/\/+$/, '');
+const openaiBaseUrl = (process.env.OPENAI_BASE_URL || '').replace(/\/+$/, '');
+const anthropicBaseUrl = (process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
+const isOpenAIGateway = gatewayBaseUrl.endsWith('/openai');
+
+if (gatewayBaseUrl) {
+    if (isOpenAIGateway) {
+        // Create custom OpenAI provider config with baseUrl override
+        // Omit apiKey so moltbot falls back to OPENAI_API_KEY env var
+        console.log('Configuring OpenAI provider with base URL:', gatewayBaseUrl);
+        config.models = config.models || {};
+        config.models.providers = config.models.providers || {};
+        config.models.providers.openai = {
+            baseUrl: gatewayBaseUrl,
+            api: 'openai-responses',
+            models: [
+                { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
+                { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
+                { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
+            ]
+        };
+        // Add models to the allowlist so they appear in /models
+        config.agents.defaults.models = config.agents.defaults.models || {};
+        config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
+        config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
+        config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
+        config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    } else {
+        console.log('Configuring Anthropic provider with base URL:', gatewayBaseUrl);
+        config.models = config.models || {};
+        config.models.providers = config.models.providers || {};
+        const providerConfig = {
+            baseUrl: gatewayBaseUrl,
+            api: 'anthropic-messages',
+            models: [
+                { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', contextWindow: 200000 },
+                { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
+                { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+            ]
+        };
+        // Include API key in provider config if set (required when using custom baseUrl)
+        if (process.env.ANTHROPIC_API_KEY) {
+            providerConfig.apiKey = process.env.ANTHROPIC_API_KEY;
+        }
+        config.models.providers.anthropic = providerConfig;
+        // Add models to the allowlist so they appear in /models
+        config.agents.defaults.models = config.agents.defaults.models || {};
+        config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
+        config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
+        config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
+        config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    }
+} else if (preferOpenAI || (!preferAnthropic && process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY)) {
+    const directOpenAIBaseUrl = openaiBaseUrl || 'https://api.openai.com/v1';
+    console.log('Configuring OpenAI provider (direct) with base URL:', directOpenAIBaseUrl);
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
     config.models.providers.openai = {
-        baseUrl: baseUrl,
+        baseUrl: directOpenAIBaseUrl,
         api: 'openai-responses',
         models: [
             { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
@@ -240,38 +362,40 @@ if (isOpenAI) {
             { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
         ]
     };
-    // Add models to the allowlist so they appear in /models
     config.agents.defaults.models = config.agents.defaults.models || {};
     config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
     config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
     config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
     config.agents.defaults.model.primary = 'openai/gpt-5.2';
-} else if (baseUrl) {
-    console.log('Configuring Anthropic provider with base URL:', baseUrl);
-    config.models = config.models || {};
-    config.models.providers = config.models.providers || {};
-    const providerConfig = {
-        baseUrl: baseUrl,
-        api: 'anthropic-messages',
-        models: [
-            { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', contextWindow: 200000 },
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
-            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
-        ]
-    };
-    // Include API key in provider config if set (required when using custom baseUrl)
-    if (process.env.ANTHROPIC_API_KEY) {
-        providerConfig.apiKey = process.env.ANTHROPIC_API_KEY;
+} else if (process.env.ANTHROPIC_API_KEY || anthropicBaseUrl) {
+    if (anthropicBaseUrl) {
+        console.log('Configuring Anthropic provider with base URL:', anthropicBaseUrl);
+        config.models = config.models || {};
+        config.models.providers = config.models.providers || {};
+        const providerConfig = {
+            baseUrl: anthropicBaseUrl,
+            api: 'anthropic-messages',
+            models: [
+                { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', contextWindow: 200000 },
+                { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
+                { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+            ]
+        };
+        if (process.env.ANTHROPIC_API_KEY) {
+            providerConfig.apiKey = process.env.ANTHROPIC_API_KEY;
+        }
+        config.models.providers.anthropic = providerConfig;
+        config.agents.defaults.models = config.agents.defaults.models || {};
+        config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
+        config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
+        config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
+        config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    } else {
+        // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
+        config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
     }
-    config.models.providers.anthropic = providerConfig;
-    // Add models to the allowlist so they appear in /models
-    config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
-    config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
-    config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
 } else {
-    // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
+    // Last-resort default (will fail without provider keys)
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
 }
 

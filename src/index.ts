@@ -73,9 +73,9 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
     if (!env.AI_GATEWAY_BASE_URL) {
       missing.push('AI_GATEWAY_BASE_URL (required when using AI_GATEWAY_API_KEY)');
     }
-  } else if (!env.ANTHROPIC_API_KEY) {
-    // Direct Anthropic access requires API key
-    missing.push('ANTHROPIC_API_KEY or AI_GATEWAY_API_KEY');
+  } else if (!env.ANTHROPIC_API_KEY && !env.OPENAI_API_KEY) {
+    // Direct provider access requires at least one API key
+    missing.push('ANTHROPIC_API_KEY or OPENAI_API_KEY or AI_GATEWAY_API_KEY');
   }
 
   return missing;
