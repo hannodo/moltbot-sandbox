@@ -192,13 +192,7 @@ app.use('*', async (c, next) => {
     url.pathname === '/api/status' ||
     url.pathname === '/logo.png' ||
     url.pathname === '/logo-small.png' ||
-    url.pathname.startsWith('/_admin/assets/') ||
-    // TEMP DEBUG: allow these without Access for investigation
-    url.pathname === '/debug/logs' ||
-    url.pathname === '/debug/processes' ||
-    url.pathname === '/debug/gateway-api' ||
-    url.pathname === '/debug/cli' ||
-    url.pathname === '/debug/env';
+    url.pathname.startsWith('/_admin/assets/');
 
   if (isPublicPath) return next();
 
