@@ -46,14 +46,63 @@ fi
 # ============================================================
 # PERSISTENT OPENCLAW INSTALL (R2-backed if available)
 # ============================================================
-# Install OpenClaw into a persistent location so self-updates can survive restarts.
-# If /data/moltbot is not mounted, this will still work but won't persist.
+# Goal: Persist OpenClaw across restarts using R2 (/data/moltbot).
+# Important: R2 mounted via s3fs is not POSIX-perfect; installing node_modules directly onto s3fs
+# can fail (ENOTEMPTY/rename) and copying many small files can hang.
+# Strategy:
+#   - Install into local FS (/tmp) (fast, POSIX)
+#   - Persist as a single tarball in R2-backed storage
+#   - Extract on startup into /tmp and run from there
 OPENCLAW_PERSIST_DIR="$BACKUP_DIR/openclaw"
 OPENCLAW_WRAPPER_DIR="$OPENCLAW_PERSIST_DIR/bin"
-OPENCLAW_PERSIST_BIN="$OPENCLAW_PERSIST_DIR/node_modules/.bin"
+OPENCLAW_PERSIST_BIN="$OPENCLAW_PERSIST_DIR/node_modules/.bin"   # legacy (not relied on)
 OPENCLAW_PERSIST_VERSION="${OPENCLAW_PERSIST_VERSION:-latest}"
 OPENCLAW_INSTALL_LOG="$OPENCLAW_PERSIST_DIR/install.log"
 OPENCLAW_INSTALL_LOCK="$OPENCLAW_PERSIST_DIR/.installing"
+OPENCLAW_TARBALL="$OPENCLAW_PERSIST_DIR/openclaw-node_modules.tgz"
+OPENCLAW_STAGE_DIR="/tmp/openclaw-persist-stage"
+OPENCLAW_RUNTIME_DIR="/tmp/openclaw-runtime"
+
+install_openclaw_to_tarball() {
+    rm -rf "$OPENCLAW_STAGE_DIR" "$OPENCLAW_RUNTIME_DIR" 2>/dev/null || true
+    mkdir -p "$OPENCLAW_STAGE_DIR" "$OPENCLAW_PERSIST_DIR" "$OPENCLAW_WRAPPER_DIR"
+
+    echo "[openclaw-persist] staging npm install openclaw@${OPENCLAW_PERSIST_VERSION} into $OPENCLAW_STAGE_DIR" >> "$OPENCLAW_INSTALL_LOG"
+    npm install --prefix "$OPENCLAW_STAGE_DIR" "openclaw@${OPENCLAW_PERSIST_VERSION}" --no-fund --no-audit >> "$OPENCLAW_INSTALL_LOG" 2>&1
+
+    if [ ! -x "$OPENCLAW_STAGE_DIR/node_modules/.bin/openclaw" ]; then
+        echo "[openclaw-persist] ERROR: staged openclaw binary missing" >> "$OPENCLAW_INSTALL_LOG"
+        return 2
+    fi
+
+    echo "[openclaw-persist] creating tarball $OPENCLAW_TARBALL" >> "$OPENCLAW_INSTALL_LOG"
+    rm -f "$OPENCLAW_TARBALL" 2>/dev/null || true
+    tar -czf "$OPENCLAW_TARBALL" -C "$OPENCLAW_STAGE_DIR" node_modules >> "$OPENCLAW_INSTALL_LOG" 2>&1
+
+    echo "[openclaw-persist] tarball ready" >> "$OPENCLAW_INSTALL_LOG"
+    return 0
+}
+
+activate_openclaw_from_tarball() {
+    if [ ! -f "$OPENCLAW_TARBALL" ]; then
+        return 1
+    fi
+
+    rm -rf "$OPENCLAW_RUNTIME_DIR" 2>/dev/null || true
+    mkdir -p "$OPENCLAW_RUNTIME_DIR"
+
+    echo "[openclaw-persist] extracting $OPENCLAW_TARBALL to $OPENCLAW_RUNTIME_DIR" >> "$OPENCLAW_INSTALL_LOG"
+    tar -xzf "$OPENCLAW_TARBALL" -C "$OPENCLAW_RUNTIME_DIR" >> "$OPENCLAW_INSTALL_LOG" 2>&1
+
+    if [ -x "$OPENCLAW_RUNTIME_DIR/node_modules/.bin/openclaw" ]; then
+        export PATH="$OPENCLAW_WRAPPER_DIR:$OPENCLAW_RUNTIME_DIR/node_modules/.bin:$PATH"
+        echo "Using persistent OpenClaw (tarball) from $OPENCLAW_TARBALL" >> "$OPENCLAW_INSTALL_LOG"
+        return 0
+    fi
+
+    echo "[openclaw-persist] ERROR: extracted openclaw missing" >> "$OPENCLAW_INSTALL_LOG"
+    return 2
+}
 
 if [ -d "$BACKUP_DIR" ]; then
     mkdir -p "$OPENCLAW_PERSIST_DIR" "$OPENCLAW_WRAPPER_DIR"
@@ -66,10 +115,15 @@ if [ -d "$BACKUP_DIR" ]; then
 EOFJSON
     fi
 
-    # Wrapper to make `openclaw update` work in this environment
+    # Wrapper to make `openclaw update` work in this environment.
     cat > "$OPENCLAW_WRAPPER_DIR/openclaw" << 'EOFWRAP'
 #!/bin/sh
-PERSIST_BIN="/data/moltbot/openclaw/node_modules/.bin/openclaw"
+set -e
+PERSIST_DIR="/data/moltbot/openclaw"
+TARBALL="$PERSIST_DIR/openclaw-node_modules.tgz"
+STAGE_DIR="/tmp/openclaw-persist-stage"
+RUNTIME_DIR="/tmp/openclaw-runtime"
+
 if [ "$1" = "update" ]; then
   shift
   VERSION="latest"
@@ -84,37 +138,50 @@ if [ "$1" = "update" ]; then
         ;;
     esac
   done
-  echo "[openclaw-wrapper] Updating OpenClaw in /data/moltbot/openclaw (version: ${VERSION})..."
-  npm install --prefix /data/moltbot/openclaw "openclaw@${VERSION}" --no-fund --no-audit
-  exit $?
+
+  LOG="$PERSIST_DIR/install.log"
+  : > "$LOG"
+  echo "[openclaw-wrapper] Updating OpenClaw (version: ${VERSION})..." >> "$LOG"
+
+  rm -rf "$STAGE_DIR" "$RUNTIME_DIR" 2>/dev/null || true
+  mkdir -p "$STAGE_DIR" "$RUNTIME_DIR"
+
+  npm install --prefix "$STAGE_DIR" "openclaw@${VERSION}" --no-fund --no-audit >> "$LOG" 2>&1
+  tar -czf "$TARBALL" -C "$STAGE_DIR" node_modules >> "$LOG" 2>&1
+  tar -xzf "$TARBALL" -C "$RUNTIME_DIR" >> "$LOG" 2>&1
+
+  echo "[openclaw-wrapper] Done. Version:" >> "$LOG"
+  "$RUNTIME_DIR/node_modules/.bin/openclaw" --version >> "$LOG" 2>&1
+  exit 0
 fi
-if [ -x "$PERSIST_BIN" ]; then
-  exec "$PERSIST_BIN" "$@"
+
+if [ -x "$RUNTIME_DIR/node_modules/.bin/openclaw" ]; then
+  exec "$RUNTIME_DIR/node_modules/.bin/openclaw" "$@"
 fi
 exec /usr/local/bin/openclaw "$@"
 EOFWRAP
     chmod +x "$OPENCLAW_WRAPPER_DIR/openclaw"
 
-    if [ ! -x "$OPENCLAW_PERSIST_BIN/openclaw" ]; then
+    : > "$OPENCLAW_INSTALL_LOG" 2>/dev/null || true
+    if activate_openclaw_from_tarball; then
+        :
+    else
+        echo "Persistent OpenClaw tarball not ready; will attempt background install." >> "$OPENCLAW_INSTALL_LOG"
+
         if mkdir "$OPENCLAW_INSTALL_LOCK" 2>/dev/null; then
-            echo "Installing OpenClaw into $OPENCLAW_PERSIST_DIR (version: $OPENCLAW_PERSIST_VERSION) in background..."
+            echo "Installing OpenClaw tarball into $OPENCLAW_PERSIST_DIR (version: $OPENCLAW_PERSIST_VERSION) in background..." >> "$OPENCLAW_INSTALL_LOG"
             (
-                npm install --prefix "$OPENCLAW_PERSIST_DIR" "openclaw@$OPENCLAW_PERSIST_VERSION" --no-fund --no-audit > "$OPENCLAW_INSTALL_LOG" 2>&1
-                rc=$?
-                rm -rf "$OPENCLAW_INSTALL_LOCK"
+                rc=0
+                install_openclaw_to_tarball || rc=$?
+                rm -rf "$OPENCLAW_INSTALL_LOCK" 2>/dev/null || true
                 exit $rc
             ) &
         else
-            echo "OpenClaw install already in progress; continuing startup."
+            echo "OpenClaw install already in progress; continuing startup." >> "$OPENCLAW_INSTALL_LOG"
         fi
-    fi
 
-    if [ -x "$OPENCLAW_PERSIST_BIN/openclaw" ]; then
-        export PATH="$OPENCLAW_WRAPPER_DIR:$OPENCLAW_PERSIST_BIN:$PATH"
-        echo "Using persistent OpenClaw at $OPENCLAW_PERSIST_DIR"
-    else
         export PATH="$OPENCLAW_WRAPPER_DIR:$PATH"
-        echo "Persistent OpenClaw not ready yet; using system OpenClaw for now."
+        echo "Persistent OpenClaw not ready yet; using system OpenClaw for now." >> "$OPENCLAW_INSTALL_LOG"
     fi
 else
     echo "Persistent OpenClaw not configured (no $BACKUP_DIR)."
