@@ -26,6 +26,24 @@ echo "Config directory: $CONFIG_DIR"
 echo "Backup directory: $BACKUP_DIR"
 
 # ============================================================
+# OPTIONAL: GITHUB DEPLOY KEY (for bot-managed repo access)
+# ============================================================
+if [ -n "$GITHUB_DEPLOY_KEY" ] || [ -n "$GITHUB_DEPLOY_KEY_FILE" ]; then
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    if [ -n "$GITHUB_DEPLOY_KEY_FILE" ] && [ -f "$GITHUB_DEPLOY_KEY_FILE" ]; then
+        cp "$GITHUB_DEPLOY_KEY_FILE" /root/.ssh/id_ed25519
+    else
+        printf "%s\n" "$GITHUB_DEPLOY_KEY" > /root/.ssh/id_ed25519
+    fi
+    chmod 600 /root/.ssh/id_ed25519
+    # Accept new host keys automatically (avoids interactive prompt)
+    export GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new"
+    export GIT_TERMINAL_PROMPT=0
+    echo "GitHub deploy key configured for non-interactive git."
+fi
+
+# ============================================================
 # PERSISTENT OPENCLAW INSTALL (R2-backed if available)
 # ============================================================
 # Install OpenClaw into a persistent location so self-updates can survive restarts.
