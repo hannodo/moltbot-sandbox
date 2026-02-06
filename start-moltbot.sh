@@ -351,10 +351,39 @@ rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
 BIND_MODE="lan"
 echo "Dev mode: ${CLAWDBOT_DEV_MODE:-false}, Bind mode: $BIND_MODE"
 
+# Prefer image binary path explicitly to avoid picking up accidental PATH overrides.
+OPENCLAW_BIN="/usr/local/bin/openclaw"
+if [ ! -x "$OPENCLAW_BIN" ]; then
+    OPENCLAW_BIN="$(command -v openclaw || true)"
+fi
+if [ -z "$OPENCLAW_BIN" ]; then
+    echo "ERROR: openclaw binary not found"
+    exit 1
+fi
+
+# CLI flags changed across OpenClaw versions. Detect support at runtime to avoid boot loops
+# when the running binary was updated and no longer accepts older flags.
+HELP_TEXT="$($OPENCLAW_BIN gateway --help 2>&1 || true)"
+GATEWAY_ARGS=(gateway --port 18789 --verbose)
+
+if echo "$HELP_TEXT" | grep -q -- '--allow-unconfigured'; then
+    GATEWAY_ARGS+=(--allow-unconfigured)
+fi
+
+if echo "$HELP_TEXT" | grep -q -- '--bind'; then
+    GATEWAY_ARGS+=(--bind "$BIND_MODE")
+fi
+
 if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
-    echo "Starting gateway with token auth..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$CLAWDBOT_GATEWAY_TOKEN"
+    if echo "$HELP_TEXT" | grep -q -- '--token'; then
+        echo "Starting gateway with token auth..."
+        GATEWAY_ARGS+=(--token "$CLAWDBOT_GATEWAY_TOKEN")
+    else
+        echo "Gateway token is set in config; CLI does not expose --token flag."
+        echo "Starting gateway with token auth..."
+    fi
 else
     echo "Starting gateway with device pairing (no token)..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"
 fi
+
+exec "$OPENCLAW_BIN" "${GATEWAY_ARGS[@]}"
