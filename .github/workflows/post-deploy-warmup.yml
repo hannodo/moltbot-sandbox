@@ -1,5 +1,9 @@
 name: Post Deploy Warmup
 
+concurrency:
+  group: post-deploy-warmup-main
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -23,8 +27,8 @@ jobs:
           # Webhook returns 503 while gateway is still cold/unavailable.
           # Any non-503 means the worker/container path is alive.
           for i in $(seq 1 40); do
-            code="$(curl -sS -o /tmp/warmup_body.txt -w "%{http_code}" -X POST "$WARMUP_URL" -H "content-type: application/json" --data '{}')"
-            body="$(cat /tmp/warmup_body.txt)"
+            code="$(curl -sS --max-time 45 -o /tmp/warmup_body.txt -w "%{http_code}" -X POST "$WARMUP_URL" -H "content-type: application/json" --data '{}' || echo "000")"
+            body="$(cat /tmp/warmup_body.txt 2>/dev/null || echo "<no body>")"
             echo "attempt=$i status=$code body=$body"
 
             if [ "$code" != "503" ]; then
