@@ -211,6 +211,13 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     if (webhookUrl) {
         config.channels.telegram.webhookUrl = webhookUrl;
         config.channels.telegram.webhookPath = '/telegram-webhook';
+        // OpenClaw requires webhookSecret when webhookUrl is configured.
+        // Reuse explicit TELEGRAM_WEBHOOK_SECRET if provided, otherwise fall back
+        // to the gateway token so the value is stable across restarts.
+        const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET || process.env.CLAWDBOT_GATEWAY_TOKEN;
+        if (webhookSecret) {
+            config.channels.telegram.webhookSecret = webhookSecret;
+        }
         console.log('Telegram webhook URL:', webhookUrl);
     } else {
         console.warn('WARNING: No webhook URL configured. Set TELEGRAM_WEBHOOK_URL, WORKER_PUBLIC_URL, or WORKER_URL');
