@@ -1,0 +1,71 @@
+name: OpenClaw Auto Update
+
+on:
+  schedule:
+    - cron: "15 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openclaw-auto-update
+  cancel-in-progress: false
+
+jobs:
+  update-openclaw:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Get latest OpenClaw version from npm
+        id: latest
+        run: |
+          set -euo pipefail
+          latest="$(npm view openclaw version)"
+          echo "version=$latest" >> "$GITHUB_OUTPUT"
+          echo "Latest npm version: $latest"
+
+      - name: Read pinned OpenClaw version from Dockerfile
+        id: current
+        run: |
+          set -euo pipefail
+          current="$(grep -Eo 'openclaw@[0-9A-Za-z._-]+' Dockerfile | head -n1 | cut -d@ -f2)"
+          if [ -z "$current" ]; then
+            echo "Could not detect pinned openclaw version in Dockerfile" >&2
+            exit 1
+          fi
+          echo "version=$current" >> "$GITHUB_OUTPUT"
+          echo "Current pinned version: $current"
+
+      - name: Update Dockerfile pin
+        if: steps.latest.outputs.version != steps.current.outputs.version
+        run: |
+          set -euo pipefail
+          latest="${{ steps.latest.outputs.version }}"
+          sed -i "s/openclaw@[0-9A-Za-z._-]*/openclaw@${latest}/" Dockerfile
+
+          stamp="$(date -u +%Y-%m-%d)-auto-openclaw-${latest}"
+          if grep -q "^# Build cache bust:" Dockerfile; then
+            sed -i "s|^# Build cache bust:.*|# Build cache bust: ${stamp}|" Dockerfile
+          fi
+
+      - name: Commit and push
+        if: steps.latest.outputs.version != steps.current.outputs.version
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Dockerfile
+          git commit -m "chore: bump openclaw to ${{ steps.latest.outputs.version }}"
+          git push
+
+      - name: No update needed
+        if: steps.latest.outputs.version == steps.current.outputs.version
+        run: echo "OpenClaw is already up to date."
