@@ -280,8 +280,7 @@ echo "Gateway will be available on port 18789"
 rm -f /tmp/clawdbot-gateway.lock 2>/dev/null || true
 rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
 
-BIND_MODE="lan"
-echo "Dev mode: ${CLAWDBOT_DEV_MODE:-false}, Bind mode: $BIND_MODE"
+echo "Dev mode: ${CLAWDBOT_DEV_MODE:-false}"
 
 # Prefer image binary path explicitly to avoid picking up accidental PATH overrides.
 OPENCLAW_BIN="/usr/local/bin/openclaw"
@@ -335,18 +334,6 @@ echo "Detected gateway command mode: $GATEWAY_MODE"
 
 if echo "$HELP_TEXT" | grep -q -- '--port'; then
     GATEWAY_ARGS+=(--port 18789)
-fi
-
-if echo "$HELP_TEXT" | grep -q -- '--verbose'; then
-    GATEWAY_ARGS+=(--verbose)
-fi
-
-if echo "$HELP_TEXT" | grep -q -- '--allow-unconfigured'; then
-    GATEWAY_ARGS+=(--allow-unconfigured)
-fi
-
-if echo "$HELP_TEXT" | grep -q -- '--bind'; then
-    GATEWAY_ARGS+=(--bind "$BIND_MODE")
 fi
 
 if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
