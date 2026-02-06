@@ -86,8 +86,9 @@ publicRoutes.post('/telegram-webhook', async (c) => {
     });
   } catch (error) {
     console.error('[TELEGRAM-WEBHOOK] Error:', error);
-    // Return 200 to Telegram to avoid retries (we'll log the error)
-    return c.json({ ok: true, error: 'Gateway not ready' });
+    // Return non-2xx so Telegram retries delivery instead of dropping updates.
+    // 200 here causes silent message loss whenever the gateway is cold/down.
+    return c.json({ ok: false, error: 'Gateway not ready' }, 503);
   }
 });
 
