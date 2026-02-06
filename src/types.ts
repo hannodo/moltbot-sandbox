@@ -17,9 +17,6 @@ export interface MoltbotEnv {
   OPENAI_BASE_URL?: string;
   MOLTBOT_GATEWAY_TOKEN?: string; // Gateway token (mapped to CLAWDBOT_GATEWAY_TOKEN for container)
   PREFERRED_PROVIDER?: string; // 'openai' or 'anthropic' to force provider selection
-  GITHUB_DEPLOY_KEY?: string; // Private deploy key for GitHub (passed to container)
-  GITHUB_DEPLOY_KEY_FILE?: string; // Optional path to deploy key file (container)
-  GITHUB_REPO_SSH?: string; // Optional SSH repo URL for bot updates
 
   CLAWDBOT_BIND_MODE?: string;
   DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + moltbot device pairing)
