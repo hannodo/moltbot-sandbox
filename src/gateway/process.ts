@@ -92,7 +92,8 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     console.log('Process started with id:', process.id, 'status:', process.status);
   } catch (startErr) {
     console.error('Failed to start process:', startErr);
-    throw startErr;
+    const msg = startErr instanceof Error ? startErr.message : String(startErr);
+    throw new Error(`Moltbot gateway failed to start. startProcess error: ${msg}`);
   }
 
   // Wait for the gateway to be ready
@@ -106,6 +107,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     if (logs.stderr) console.log('[Gateway] stderr:', logs.stderr);
   } catch (e) {
     console.error('[Gateway] waitForPort failed:', e);
+    const waitMsg = e instanceof Error ? e.message : String(e);
     try {
       const logs = await process.getLogs();
       console.error('[Gateway] startup failed. Stderr:', logs.stderr);
@@ -113,7 +115,8 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
       throw new Error(`Moltbot gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`);
     } catch (logErr) {
       console.error('[Gateway] Failed to get logs:', logErr);
-      throw e;
+      const logMsg = logErr instanceof Error ? logErr.message : String(logErr);
+      throw new Error(`Moltbot gateway failed to start. waitForPort error: ${waitMsg}; log error: ${logMsg}`);
     }
   }
 
