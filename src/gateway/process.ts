@@ -90,6 +90,18 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
       env: Object.keys(envVars).length > 0 ? envVars : undefined,
     });
     console.log('Process started with id:', process.id, 'status:', process.status);
+
+    // start-moltbot.sh exits 0 immediately when another gateway process already
+    // listens on 18789. Treat that as success instead of a boot failure.
+    if (process.status === 'completed') {
+      const startupLogs = await process.getLogs();
+      const exitedBecauseReachable = startupLogs.stdout?.includes('Gateway port 18789 is already reachable, exiting.');
+      if (exitedBecauseReachable) {
+        console.log('Startup script exited because gateway is already reachable; reusing existing gateway process');
+        const runningGateway = await findExistingMoltbotProcess(sandbox);
+        return runningGateway ?? process;
+      }
+    }
   } catch (startErr) {
     console.error('Failed to start process:', startErr);
     const msg = startErr instanceof Error ? startErr.message : String(startErr);
