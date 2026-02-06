@@ -1,0 +1,39 @@
+name: Post Deploy Warmup
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Cloudflare deploy rollout
+        run: sleep 120
+
+      - name: Trigger gateway warmup
+        env:
+          WARMUP_URL: https://moltbot-sandbox.hannodormagen.workers.dev/telegram-webhook
+        run: |
+          set -euo pipefail
+
+          # Retry up to 20 minutes.
+          # Webhook returns 503 while gateway is still cold/unavailable.
+          # Any non-503 means the worker/container path is alive.
+          for i in $(seq 1 40); do
+            code="$(curl -sS -o /tmp/warmup_body.txt -w "%{http_code}" -X POST "$WARMUP_URL" -H "content-type: application/json" --data '{}')"
+            body="$(cat /tmp/warmup_body.txt)"
+            echo "attempt=$i status=$code body=$body"
+
+            if [ "$code" != "503" ]; then
+              echo "Warmup succeeded (non-503 response)."
+              exit 0
+            fi
+
+            sleep 30
+          done
+
+          echo "Warmup timed out after 20 minutes."
+          exit 1
