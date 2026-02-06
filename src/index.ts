@@ -407,12 +407,19 @@ async function scheduled(
   const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
 
   console.log('[cron] Ensuring Moltbot gateway is running...');
-  try {
-    await ensureMoltbotGateway(sandbox, env);
-    console.log('[cron] Gateway is running.');
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error('[cron] Gateway warmup failed:', msg);
+  const maxWarmupAttempts = 3;
+  for (let attempt = 1; attempt <= maxWarmupAttempts; attempt++) {
+    try {
+      await ensureMoltbotGateway(sandbox, env);
+      console.log('[cron] Gateway is running.');
+      break;
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[cron] Gateway warmup failed (attempt ${attempt}/${maxWarmupAttempts}):`, msg);
+      if (attempt < maxWarmupAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    }
   }
 
   console.log('[cron] Starting backup sync to R2...');

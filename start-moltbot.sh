@@ -8,11 +8,26 @@
 
 set -e
 
-# Check if openclaw gateway is already running - bail early if so
-# CLI is now named "openclaw"
-if pgrep -f "openclaw gateway" > /dev/null 2>&1; then
-    echo "Moltbot gateway is already running, exiting."
+# Check whether gateway port is already reachable. Process-name checks alone are unreliable
+# after failed upgrades (stale processes can remain while the port is down).
+is_gateway_port_open() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/18789' >/dev/null 2>&1
+        return $?
+    fi
+    bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/18789' >/dev/null 2>&1
+    return $?
+}
+
+if is_gateway_port_open; then
+    echo "Gateway port 18789 is already reachable, exiting."
     exit 0
+fi
+
+if pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+    echo "Found stale openclaw gateway process without listening port; terminating it."
+    pkill -f "openclaw gateway" >/dev/null 2>&1 || true
+    sleep 1
 fi
 
 # Paths (clawdbot paths are used internally - upstream hasn't renamed yet)
