@@ -86,9 +86,15 @@ publicRoutes.post('/telegram-webhook', async (c) => {
     });
   } catch (error) {
     console.error('[TELEGRAM-WEBHOOK] Error:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    const reason = message.includes('failed to start. Stderr:')
+      ? 'gateway_boot_failed'
+      : message.includes('failed to start')
+      ? 'process_start_failed'
+      : 'gateway_unavailable';
     // Return non-2xx so Telegram retries delivery instead of dropping updates.
     // 200 here causes silent message loss whenever the gateway is cold/down.
-    return c.json({ ok: false, error: 'Gateway not ready' }, 503);
+    return c.json({ ok: false, error: 'Gateway not ready', reason }, 503);
   }
 });
 

@@ -167,7 +167,6 @@ config.agents.defaults.model = config.agents.defaults.model || {};
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
 config.commands = config.commands || {};
-config.commands.restart = true;
 
 // Clean up any broken anthropic provider config from previous runs
 // (older versions didn't include required 'name' field)
@@ -184,7 +183,8 @@ if (config.models?.providers?.anthropic?.models) {
 // Gateway configuration
 config.gateway.port = 18789;
 config.gateway.mode = 'local';
-config.gateway.trustedProxies = ['10.1.0.0'];
+// Use a valid private CIDR range for trusted proxies.
+config.gateway.trustedProxies = ['10.0.0.0/8'];
 
 // Set gateway token if provided
 if (process.env.CLAWDBOT_GATEWAY_TOKEN) {
@@ -349,7 +349,6 @@ if (gatewayBaseUrl) {
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
 EOFNODE
 
 # ============================================================
