@@ -24,9 +24,9 @@ if is_gateway_port_open; then
     exit 0
 fi
 
-if pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+if pgrep -f "openclaw gateway|openclaw-gateway" >/dev/null 2>&1; then
     echo "Found stale openclaw gateway process without listening port; terminating it."
-    pkill -f "openclaw gateway" >/dev/null 2>&1 || true
+    pkill -f "openclaw gateway|openclaw-gateway" >/dev/null 2>&1 || true
     sleep 1
 fi
 
@@ -376,10 +376,53 @@ if [ -z "$OPENCLAW_BIN" ]; then
     exit 1
 fi
 
-# CLI flags changed across OpenClaw versions. Detect support at runtime to avoid boot loops
-# when the running binary was updated and no longer accepts older flags.
-HELP_TEXT="$($OPENCLAW_BIN gateway --help 2>&1 || true)"
-GATEWAY_ARGS=(gateway --port 18789 --verbose)
+# Ensure newer OpenClaw versions read the config file we generate here.
+export OPENCLAW_CONFIG_PATH="$CONFIG_FILE"
+export CLAWDBOT_CONFIG_PATH="$CONFIG_FILE"
+
+# CLI shape changed across versions:
+# - legacy: openclaw gateway --port ...
+# - newer:  openclaw gateway run --port ... (or gateway start)
+# Detect the supported command form first, then only pass supported flags.
+get_help_text() {
+    "$OPENCLAW_BIN" "$@" --help 2>&1 || true
+}
+
+is_supported_help() {
+    local txt="$1"
+    if echo "$txt" | grep -qiE 'unknown command|invalid command|unknown option|unknown arguments'; then
+        return 1
+    fi
+    return 0
+}
+
+GATEWAY_HELP="$(get_help_text gateway)"
+GATEWAY_RUN_HELP="$(get_help_text gateway run)"
+GATEWAY_START_HELP="$(get_help_text gateway start)"
+
+GATEWAY_MODE="gateway"
+HELP_TEXT="$GATEWAY_HELP"
+GATEWAY_ARGS=(gateway)
+
+if is_supported_help "$GATEWAY_RUN_HELP"; then
+    GATEWAY_MODE="gateway run"
+    HELP_TEXT="$GATEWAY_RUN_HELP"
+    GATEWAY_ARGS=(gateway run)
+elif is_supported_help "$GATEWAY_START_HELP"; then
+    GATEWAY_MODE="gateway start"
+    HELP_TEXT="$GATEWAY_START_HELP"
+    GATEWAY_ARGS=(gateway start)
+fi
+
+echo "Detected gateway command mode: $GATEWAY_MODE"
+
+if echo "$HELP_TEXT" | grep -q -- '--port'; then
+    GATEWAY_ARGS+=(--port 18789)
+fi
+
+if echo "$HELP_TEXT" | grep -q -- '--verbose'; then
+    GATEWAY_ARGS+=(--verbose)
+fi
 
 if echo "$HELP_TEXT" | grep -q -- '--allow-unconfigured'; then
     GATEWAY_ARGS+=(--allow-unconfigured)
@@ -391,12 +434,9 @@ fi
 
 if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
     if echo "$HELP_TEXT" | grep -q -- '--token'; then
-        echo "Starting gateway with token auth..."
         GATEWAY_ARGS+=(--token "$CLAWDBOT_GATEWAY_TOKEN")
-    else
-        echo "Gateway token is set in config; CLI does not expose --token flag."
-        echo "Starting gateway with token auth..."
     fi
+    echo "Starting gateway with token auth..."
 else
     echo "Starting gateway with device pairing (no token)..."
 fi
