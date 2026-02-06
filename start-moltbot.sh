@@ -246,18 +246,21 @@ if (config.models && config.models.providers) {
 const preferredProvider = (process.env.PREFERRED_PROVIDER || '').toLowerCase();
 const gatewayBaseUrl = (process.env.AI_GATEWAY_BASE_URL || '').replace(/\/+$/, '');
 const gatewayLooksOpenAI = gatewayBaseUrl.endsWith('/openai');
+const stalePrimaryModels = new Set([
+    'openai/gpt-5.2',
+    'openai/gpt-4.5-preview',
+    'anthropic/claude-opus-4-5-20251101',
+    'anthropic/claude-sonnet-4-5-20250929',
+    'anthropic/claude-haiku-4-5-20251001',
+]);
+if (stalePrimaryModels.has(config.agents.defaults.model.primary)) {
+    delete config.agents.defaults.model.primary;
+}
 
-if (preferredProvider === 'openai') {
+// Only pin the primary model when explicitly requested.
+if (preferredProvider === 'openai' || (gatewayBaseUrl && gatewayLooksOpenAI)) {
     config.agents.defaults.model.primary = 'openai/gpt-5';
-} else if (preferredProvider === 'anthropic') {
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
-} else if (gatewayBaseUrl) {
-    config.agents.defaults.model.primary = gatewayLooksOpenAI
-        ? 'openai/gpt-5'
-        : 'anthropic/claude-opus-4-5';
-} else if (process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
-    config.agents.defaults.model.primary = 'openai/gpt-5';
-} else {
+} else if (preferredProvider === 'anthropic' || (gatewayBaseUrl && !gatewayLooksOpenAI)) {
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
 }
 
