@@ -406,6 +406,15 @@ async function scheduled(
   const options = buildSandboxOptions(env);
   const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
 
+  console.log('[cron] Ensuring Moltbot gateway is running...');
+  try {
+    await ensureMoltbotGateway(sandbox, env);
+    console.log('[cron] Gateway is running.');
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[cron] Gateway warmup failed:', msg);
+  }
+
   console.log('[cron] Starting backup sync to R2...');
   const result = await syncToR2(sandbox, env);
   
