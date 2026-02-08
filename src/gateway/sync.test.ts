@@ -114,7 +114,8 @@ describe('syncToR2', () => {
       expect(rsyncCall).toContain('--no-times');
       expect(rsyncCall).toContain('--delete');
       expect(rsyncCall).toContain('/root/.clawdbot/');
-      expect(rsyncCall).toContain('/data/moltbot/');
+      expect(rsyncCall).toContain('/root/.openclaw/');
+      expect(rsyncCall).toContain('/data/moltbot/openclaw-home/');
     });
   });
 });

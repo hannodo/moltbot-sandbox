@@ -47,7 +47,7 @@ mkdir -p "$CONFIG_DIR"
 # ============================================================
 # Check if R2 backup exists by looking for clawdbot.json
 # The BACKUP_DIR may exist but be empty if R2 was just mounted
-# Note: backup structure is $BACKUP_DIR/clawdbot/ and $BACKUP_DIR/skills/
+# Note: backup structure is $BACKUP_DIR/clawdbot/, $BACKUP_DIR/skills/, and $BACKUP_DIR/openclaw-home/
 
 # Helper function to check if R2 backup is newer than local
 should_restore_from_r2() {
@@ -108,14 +108,23 @@ else
     echo "R2 not mounted, starting fresh"
 fi
 
-# Restore skills from R2 backup if available (only if R2 is newer)
+# Restore skills and OpenClaw OAuth data from R2 backup if available (only if R2 is newer)
 SKILLS_DIR="/root/clawd/skills"
+OPENCLAW_HOME_DIR="/root/.openclaw"
 if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ]; then
     if should_restore_from_r2; then
         echo "Restoring skills from $BACKUP_DIR/skills..."
         mkdir -p "$SKILLS_DIR"
         cp -a "$BACKUP_DIR/skills/." "$SKILLS_DIR/"
         echo "Restored skills from R2 backup"
+    fi
+fi
+if [ -d "$BACKUP_DIR/openclaw-home" ] && [ "$(ls -A $BACKUP_DIR/openclaw-home 2>/dev/null)" ]; then
+    if should_restore_from_r2; then
+        echo "Restoring OpenClaw home from $BACKUP_DIR/openclaw-home..."
+        mkdir -p "$OPENCLAW_HOME_DIR"
+        cp -a "$BACKUP_DIR/openclaw-home/." "$OPENCLAW_HOME_DIR/"
+        echo "Restored OpenClaw OAuth/state from R2 backup"
     fi
 fi
 
