@@ -13,6 +13,17 @@ export interface AccessMiddlewareOptions {
 }
 
 /**
+ * Build a Cloudflare Access login URL for the current app host/path.
+ * Redirecting to the team root may show the App Launcher page instead of app login.
+ */
+function buildAccessLoginUrl(c: Context<AppEnv>, teamDomain: string): string {
+  const currentUrl = new URL(c.req.url);
+  const redirectTarget = `${currentUrl.pathname}${currentUrl.search}`;
+  const params = new URLSearchParams({ redirect_url: redirectTarget });
+  return `https://${teamDomain}/cdn-cgi/access/login/${currentUrl.host}?${params.toString()}`;
+}
+
+/**
  * Check if running in development mode (skips CF Access auth)
  */
 export function isDevMode(env: MoltbotEnv): boolean {
@@ -74,8 +85,9 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
     const jwt = extractJWT(c);
 
     if (!jwt) {
+      const loginUrl = buildAccessLoginUrl(c, teamDomain);
       if (type === 'html' && redirectOnMissing) {
-        return c.redirect(`https://${teamDomain}`, 302);
+        return c.redirect(loginUrl, 302);
       }
       
       if (type === 'json') {
@@ -89,7 +101,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
             <body>
               <h1>Unauthorized</h1>
               <p>Missing Cloudflare Access token.</p>
-              <a href="https://${teamDomain}">Login</a>
+              <a href="${loginUrl}">Login</a>
             </body>
           </html>
         `, 401);
@@ -103,6 +115,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
       await next();
     } catch (err) {
       console.error('Access JWT verification failed:', err);
+      const loginUrl = buildAccessLoginUrl(c, teamDomain);
       
       if (type === 'json') {
         return c.json({
@@ -115,7 +128,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
             <body>
               <h1>Unauthorized</h1>
               <p>Your Cloudflare Access session is invalid or expired.</p>
-              <a href="https://${teamDomain}">Login again</a>
+              <a href="${loginUrl}">Login again</a>
             </body>
           </html>
         `, 401);

@@ -118,6 +118,7 @@ describe('createAccessMiddleware', () => {
     env?: Partial<MoltbotEnv>;
     jwtHeader?: string;
     cookies?: string;
+    url?: string;
   }): { c: Context<AppEnv>; jsonMock: ReturnType<typeof vi.fn>; htmlMock: ReturnType<typeof vi.fn>; redirectMock: ReturnType<typeof vi.fn>; setMock: ReturnType<typeof vi.fn> } {
     const headers = new Headers();
     if (options.jwtHeader) {
@@ -134,6 +135,7 @@ describe('createAccessMiddleware', () => {
 
     const c = {
       req: {
+        url: options.url || 'https://moltbot-sandbox.hannodormagen.workers.dev/_admin/',
         header: (name: string) => headers.get(name),
         raw: { headers },
       },
@@ -228,6 +230,9 @@ describe('createAccessMiddleware', () => {
     await middleware(c, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(redirectMock).toHaveBeenCalledWith('https://team.cloudflareaccess.com', 302);
+    expect(redirectMock).toHaveBeenCalledWith(
+      'https://team.cloudflareaccess.com/cdn-cgi/access/login/moltbot-sandbox.hannodormagen.workers.dev?redirect_url=%2F_admin%2F',
+      302
+    );
   });
 });
