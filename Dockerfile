@@ -16,7 +16,7 @@ RUN npm install -g pnpm
 
 # Install openclaw (latest)
 # Pin to specific version for reproducible builds
-RUN npm install -g openclaw@2026.2.3-1 \
+RUN npm install -g openclaw@2026.2.6-3 \
     && openclaw --version
 
 # Create moltbot directories (paths still use clawdbot until upstream renames)
@@ -27,7 +27,7 @@ RUN mkdir -p /root/.clawdbot \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-06-manual-openclaw-2026.2.3-1
+# Build cache bust: 2026-02-08-auto-openclaw-2026.2.6-3
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 
